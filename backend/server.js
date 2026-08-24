@@ -10,7 +10,7 @@ const DB_NAME = 'postgres1_g8qj';
 const DB_USER ='postgres1';
 const DB_PASSWORD ='xXJgW6baw56oSmXJDH6XiocAsy3Jdj1v';
 const JWT_SECRET = 'U8BQCisA5XDefVgVKqTQzROW40QUND8L5YYdxRO6xUMWGkFwTiifWPr/QOcYklhj';
-const FRONTEND_URL = 'http://localhost:5500';
+const FRONTEND_URL = 'https://management-secrets-and-rotation.pages.dev';
 const PORT = 5000;
 const NODE_ENV = 'development';
 
