@@ -23,9 +23,9 @@ const pool = new Pool({
   database: DB_NAME,
   user: DB_USER,
   password: DB_PASSWORD,
-  ssl: NODE_ENV === 'production'
-    ? { rejectUnauthorized: false }
-    : false
+  ssl: {
+      rejectUnauthorized: false
+    }
 });
 
 app.use(cors({
