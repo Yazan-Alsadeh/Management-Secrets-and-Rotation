@@ -1,21 +1,25 @@
 const express = require('express');
 const cors = require('cors');
 const bcrypt = require('bcrypt');
+const jwt = require('jsonwebtoken');
 const { Pool } = require('pg');
 
-// Configuration constants (replace with your actual values)
-const DB_HOST ='dpg-da63b30jo6nc73e82hkg-a.singapore-postgres.render.com';
+const DB_HOST = 'dpg-da63b30jo6nc73e82hkg-a.singapore-postgres.render.com';
 const DB_PORT = 5432;
 const DB_NAME = 'postgres1_g8qj';
-const DB_USER ='postgres1';
-const DB_PASSWORD ='xXJgW6baw56oSmXJDH6XiocAsy3Jdj1v';
-const JWT_SECRET = 'U8BQCisA5XDefVgVKqTQzROW40QUND8L5YYdxRO6xUMWGkFwTiifWPr/QOcYklhj';
+const DB_USER = 'postgres1';
+const DB_PASSWORD = 'xXJgW6baw56oSmXJDH6XiocAsy3Jdj1v';
+const JWT_SECRET = 'U8BQCisA5XDefVgVKqTQzROW40QUND8L5YYdxRO6xUMWGkFwTiifWPrQOcYklhj';
 const FRONTEND_URL = 'https://management-secrets-and-rotation.pages.dev';
-const PORT = 5000;
-const NODE_ENV = 'development';
+const PORT = process.env.PORT || 5000;
+const NODE_ENV = 'production';
 
+if (JWT_SECRET === 'PASTE_LONG_RANDOM_JWT_SECRET_HERE') {
+  throw new Error('Change JWT_SECRET before starting the server');
+}
 
 const app = express();
+app.disable('x-powered-by');
 
 const pool = new Pool({
   host: DB_HOST,
@@ -23,37 +27,50 @@ const pool = new Pool({
   database: DB_NAME,
   user: DB_USER,
   password: DB_PASSWORD,
-  ssl: {
-      rejectUnauthorized: false
-    }
+  ssl: { rejectUnauthorized: false }
 });
 
 app.use(cors({
-  origin: FRONTEND_URL
+  origin: FRONTEND_URL,
+  methods: ['GET', 'POST'],
+  allowedHeaders: ['Content-Type', 'Authorization']
 }));
-
 app.use(express.json({ limit: '20kb' }));
 
-// Health check: does not expose the database password or API key.
+function createToken(user) {
+  return jwt.sign(
+    { sub: String(user.id), username: user.username },
+    JWT_SECRET,
+    { expiresIn: '1h' }
+  );
+}
+
+function requireAuth(req, res, next) {
+  const header = req.get('authorization') || '';
+  const [scheme, token] = header.split(' ');
+
+  if (scheme !== 'Bearer' || !token) {
+    return res.status(401).json({ message: 'Authentication required' });
+  }
+
+  try {
+    req.auth = jwt.verify(token, JWT_SECRET);
+    return next();
+  } catch (_error) {
+    return res.status(401).json({ message: 'Invalid or expired token' });
+  }
+}
+
 app.get('/health', async (_req, res) => {
   try {
     await pool.query('SELECT 1');
-    res.json({
-      ok: true,
-      status: 'Server is running'
-    });
+    return res.json({ ok: true, status: 'Server is running' });
   } catch (error) {
     console.error('Health check error:', error.message);
-    res.status(503).json({
-      ok: false,
-      status: 'Database unavailable'
-    });
+    return res.status(503).json({ ok: false, status: 'Database unavailable' });
   }
 });
 
-// Login compatible with your current table:
-// id, username, password, email, phone, created_at
-// The current password column is plaintext. Migrate it to bcrypt later.
 app.post('/login', async (req, res) => {
   try {
     const { username, password } = req.body || {};
@@ -66,9 +83,7 @@ app.post('/login', async (req, res) => {
       password.length < 1 ||
       password.length > 200
     ) {
-      return res.status(400).json({
-        message: 'Username and password are required'
-      });
+      return res.status(400).json({ message: 'Invalid username or password' });
     }
 
     const result = await pool.query(
@@ -80,17 +95,13 @@ app.post('/login', async (req, res) => {
     );
 
     const user = result.rows[0];
-
     if (!user || user.password !== password) {
-      return res.status(401).json({
-        message: 'Invalid username or password'
-      });
+      return res.status(401).json({ message: 'Invalid username or password' });
     }
 
-    // Never return password, DB credentials, API key, or JWT secret.
     return res.json({
       success: true,
-      message: 'Login successful',
+      token: createToken(user),
       user: {
         id: user.id,
         username: user.username,
@@ -101,14 +112,31 @@ app.post('/login', async (req, res) => {
     });
   } catch (error) {
     console.error('Login error:', error.message);
-    return res.status(500).json({
-      message: 'Internal server error'
-    });
+    return res.status(500).json({ message: 'Internal server error' });
   }
 });
 
-// Register a user in the current schema.
-// This keeps compatibility with the existing password column temporarily.
+app.get('/api/me', requireAuth, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT id, username, email, phone, created_at
+       FROM users
+       WHERE id = $1
+       LIMIT 1`,
+      [req.auth.sub]
+    );
+
+    if (!result.rows[0]) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    return res.json({ success: true, user: result.rows[0] });
+  } catch (error) {
+    console.error('Profile error:', error.message);
+    return res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
 app.post('/api/register', async (req, res) => {
   try {
     const { username, password, email, phone } = req.body || {};
@@ -118,64 +146,31 @@ app.post('/api/register', async (req, res) => {
       typeof password !== 'string' || password.length < 8 || password.length > 200 ||
       typeof email !== 'string' || email.trim().length < 3 || email.length > 255
     ) {
-      return res.status(400).json({
-        message: 'Invalid registration data'
-      });
+      return res.status(400).json({ message: 'Invalid registration data' });
     }
 
+    // This route expects the future password_hash column.
+    const passwordHash = await bcrypt.hash(password, 12);
     const result = await pool.query(
-      `INSERT INTO users (username, password, email, phone)
+      `INSERT INTO users (username, password_hash, email, phone)
        VALUES ($1, $2, $3, $4)
        RETURNING id, username, email, phone, created_at`,
-      [username.trim(), password, email.trim(), phone || null]
+      [username.trim(), passwordHash, email.trim(), phone || null]
     );
 
-    return res.status(201).json({
-      success: true,
-      message: 'User registered successfully',
-      user: result.rows[0]
-    });
+    return res.status(201).json({ success: true, user: result.rows[0] });
   } catch (error) {
+    if (error.code === '42703') {
+      return res.status(503).json({ message: 'Password migration is not completed yet' });
+    }
     if (error.code === '23505') {
-      return res.status(409).json({
-        message: 'Username or email already exists'
-      });
+      return res.status(409).json({ message: 'Username or email already exists' });
     }
-
     console.error('Registration error:', error.message);
-    return res.status(500).json({
-      message: 'Internal server error'
-    });
-  }
-});
-
-// Safe lookup: does not expose password or SQL query text.
-app.get('/api/user/:username', async (req, res) => {
-  try {
-    const result = await pool.query(
-      `SELECT id, username, email, phone, created_at
-       FROM users
-       WHERE username = $1
-       LIMIT 1`,
-      [req.params.username]
-    );
-
-    if (!result.rows[0]) {
-      return res.status(404).json({ message: 'User not found' });
-    }
-
-    return res.json({
-      success: true,
-      user: result.rows[0]
-    });
-  } catch (error) {
-    console.error('User lookup error:', error.message);
     return res.status(500).json({ message: 'Internal server error' });
   }
 });
 
-// These intentionally insecure endpoints were removed.
-// Do not expose /api/users, /api/system-info, database credentials, or API_KEY.
 
 app.use((_req, res) => {
   res.status(404).json({ message: 'Not found' });
