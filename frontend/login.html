@@ -134,7 +134,7 @@
 
     <script>
         // API URL - غير هذا عند الـ Deploy
-        const API_URL = 'http://localhost:5000'; // للاختبار المحلي
+        const API_URL = 'https://management-secrets-and-rotation.onrender.com'; // للاختبار المحلي
         // أو: const API_URL = 'https://your-render-app.onrender.com'; // عند الـ Deploy
 
         const loginForm = document.getElementById('loginForm');
@@ -156,15 +156,12 @@
             try {
                 // طلب API بدون أي حماية!
                 const response = await fetch(`${API_URL}/login`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        username: username,
-                        password: password
-                    })
-                });
+                                          method: 'POST',
+                                          headers: {
+                                            'Content-Type': 'application/json'
+                                          },
+                                          body: JSON.stringify({ username, password } )
+                                        });
 
                 const data = await response.json();
 
