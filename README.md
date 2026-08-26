@@ -87,7 +87,7 @@ const dbConfig = {
 
 ## 🏗️ Architecture
 
-![Architecture Diagram](./ARCH.png)
+![Architecture Diagram](./Docs/ARCH.png)
 
 ### Architecture Components:
 
